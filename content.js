@@ -159,6 +159,11 @@ function physicalClick(element) {
 // [핵심 변경] 사용자가 개입(hasUserChangedSpeed)하지 않는 한 영상 끝까지 유지
 function startEnforceLoop(video) {
   if (enforceInterval) clearInterval(enforceInterval);
+
+// [추가] Plex가 아닐 경우 배속 강제 주입 루프를 실행하지 않음
+  if (!window.location.hostname.includes('plex')) {
+    return;
+  }  
   
   enforceInterval = setInterval(() => {
     // 비디오가 사라지면 인터벌 종료
@@ -209,4 +214,5 @@ function syncPlexUI(rate) {
 }
 
 window.addEventListener('popstate', () => resetUserSession("페이지 이동"));
+
 init();
