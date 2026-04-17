@@ -1,4 +1,4 @@
-const GITHUB_REPO = "YOUR_GITHUB_USERNAME/YOUR_REPO_NAME"; // 본인 저장소로 변경
+const GITHUB_REPO = "Murianwind/Auto-Clicker-Speed-Controller"; // 본인 저장소로 변경
 
 const defaults = {
   masterSwitch: true,
