@@ -1,45 +1,73 @@
-name: Release
+name: Test
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_call:
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract version from tag
-        id: version
+      - name: Run tests
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          set +e
+          node content.test.js 2>&1 | tee test-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          echo "TEST_EXIT=$TEST_EXIT" >> $GITHUB_ENV
+          exit $TEST_EXIT
 
-      - name: Update manifest.json version
+      - name: Publish Test Summary
+        if: always()
         run: |
-          jq --arg v "${{ steps.version.outputs.VERSION }}" '.version = $v' manifest.json > tmp.json
-          mv tmp.json manifest.json
-          echo "manifest.json version → ${{ steps.version.outputs.VERSION }}"
-          cat manifest.json
+          SUMMARY_LINE=$(grep -E "총 [0-9]+개" test-output.txt | tail -1 || true)
 
-      - name: Create zip
-        run: |
-          ZIP_NAME="auto-clicker-${{ steps.version.outputs.TAG }}.zip"
-          zip "$ZIP_NAME" \
-            background.js \
-            content.js \
-            manifest.json \
-            popup.html \
-            popup.js
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          # ── 헤더 + 요약 ──────────────────────────────────────────────────
+          if [ "${TEST_EXIT:-0}" = "0" ]; then
+            echo "### ✅ 테스트 결과: 전체 통과" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ 테스트 결과: 실패 있음" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**${SUMMARY_LINE}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload zip to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.ZIP_NAME }}
-          tag_name: ${{ github.event.release.tag_name }}
+          # ── 실행된 테스트 전체 목록 (접기) ──────────────────────────────
+          echo "<details>" >> $GITHUB_STEP_SUMMARY
+          echo "<summary>📋 실행된 테스트 전체 목록 (클릭하여 펼치기)</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E "^(✅|❌)" test-output.txt \
+            | sed 's/^✅/✓/' \
+            | sed 's/^❌/✗  ← FAILED/' \
+            >> $GITHUB_STEP_SUMMARY || echo "(없음)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # ── 실패 상세 ────────────────────────────────────────────────────
+          FAIL_COUNT=$(grep -c "^❌" test-output.txt 2>/dev/null || echo 0)
+          if [ "$FAIL_COUNT" -gt "0" ]; then
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ 실패 상세" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            echo "**실패한 테스트:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep "^❌" test-output.txt >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            echo "**오류 메시지:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A1 "^❌" test-output.txt \
+              | grep "→" \
+              >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
