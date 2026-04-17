@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Auto Clicker & Speed Controller",
-  "version": "3.2",
-  "permissions": ["storage", "tabs", "scripting"],
+  "version": "3.3",
+  "permissions": ["storage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html"
@@ -16,5 +16,4 @@
       "js": ["content.js"]
     }
   ]
-
 }
