@@ -1,202 +1,109 @@
-let config = { keywords: [], masterSwitch: true, plexNoSub: null, plexYesSub: null };
-let lastVideoSrc = "";
-let isProcessing = false;
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 350px; font-family: sans-serif; padding: 10px; background: #f9f9f9; margin: 0; overflow: hidden; }
+    h2 { font-size: 15px; text-align: center; color: #333; margin: 5px 0 12px 0; }
+    .section { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 10px; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .row:last-child { margin-bottom: 0; }
+    .label-text { font-weight: bold; color: #444; font-size: 13px; }
+    .switch { position: relative; display: inline-block; width: 40px; height: 20px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+    .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+    input:checked + .slider { background-color: #4CAF50; }
+    input:checked + .slider:before { transform: translateX(20px); }
+    .input-group { display: flex; gap: 5px; margin-bottom: 8px; }
+    input[type="text"], select { flex: 1; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; height: 30px; box-sizing: border-box; }
+    .btn { width: 50px; height: 30px; border: none; border-radius: 4px; cursor: pointer; color: white; font-weight: bold; font-size: 12px; line-height: 30px; padding: 0; }
+    .add-btn { background-color: #4CAF50; }
+    .del-btn { background-color: #f44336; }
+    .list-item { display: flex; justify-content: space-between; align-items: center; padding: 0 8px; border: 1px solid #eee; border-radius: 4px; margin-bottom: 4px; height: 30px; font-size: 13px; box-sizing: border-box; }
+    .list-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .speed-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 5px; }
+    .speed-item { display: flex; flex-direction: column; }
+    .speed-item .label-text { margin-bottom: 4px; font-size: 11px; }
 
-// 사용자가 설정한 배속을 세션 내내 기억하기 위한 변수
-let userTargetRate = null;      
-let hasUserChangedSpeed = false; 
+    /* 업데이트 섹션 */
+    #updateSection { display: none; }
+    #updateSection.visible { display: block; }
 
-let enforceInterval = null;
-let sessionCheckTimeout = null;
+    .update-row { display: flex; justify-content: space-between; align-items: center; }
+    .update-badge { font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 10px; }
+    .badge-new { background: #e8f5e9; color: #2e7d32; }
+    .badge-latest { background: #f0f0f0; color: #888; }
+    .badge-checking { background: #fff8e1; color: #f57c00; }
+    .badge-error { background: #fdecea; color: #c62828; }
 
-// [FIX] 넷플릭스 isProcessing 고착 방지용 타이머
-let netflixProcessingTimer = null;
+    .download-btn { height: 26px; padding: 0 10px; font-size: 11px; font-weight: bold; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+    .download-btn:hover { background: #1565c0; }
+    .download-btn:disabled { background: #ccc; cursor: default; }
 
-// [FIX] video 엘리먼트 레퍼런스 추적 (리스너 누수 방지)
-let trackedVideo = null;
+    .update-guide { font-size: 11px; color: #888; margin-top: 6px; line-height: 1.5; border-top: 1px solid #eee; padding-top: 6px; }
+    .update-guide a { color: #1976d2; text-decoration: none; }
+    .update-guide a:hover { text-decoration: underline; }
 
-const NETFLIX_NEXT_PATH = "M22 3h-2v18h2zm-17.71.62C3.29 3 2 3.72 2 4.89v14.22a1.5 1.5 0 0 0 2.29 1.27l11.54-7.1a1.5 1.5 0 0 0 0-2.56zM4 18.2V5.79L14.1 12z";
+    .version-text { font-size: 11px; color: #aaa; }
+  </style>
+</head>
+<body>
+  <h2>Auto Clicker & Speed Controller</h2>
 
-function init() {
-  chrome.storage.sync.get(['masterSwitch', 'allowedSites', 'keywords', 'plexNoSub', 'plexYesSub'], (items) => {
-    if (items.masterSwitch === false) return;
-    const currentUrl = window.location.href.toLowerCase();
-    const isMatched = (items.allowedSites || []).some(site => site && currentUrl.includes(site.toLowerCase()));
-    if (isMatched) {
-      config.keywords = (items.keywords || "").split(',').map(s => s.trim());
-      config.plexNoSub = items.plexNoSub ? parseFloat(items.plexNoSub) : null;
-      config.plexYesSub = items.plexYesSub ? parseFloat(items.plexYesSub) : null;
-      setupInteractionListener();
-      startObserver();
-    }
-  });
-}
+  <!-- 업데이트 섹션 -->
+  <div class="section" id="updateSection">
+    <div class="update-row">
+      <span class="label-text" style="font-size:12px;">업데이트</span>
+      <span class="update-badge badge-checking" id="updateBadge">확인 중...</span>
+    </div>
+    <div id="updateDetail" style="display:none; margin-top:8px;">
+      <div class="update-row">
+        <span class="version-text" id="versionText"></span>
+        <button class="download-btn" id="downloadBtn">zip 다운로드</button>
+      </div>
+      <div class="update-guide">
+        다운로드 후 압축 해제 → 확장 디렉토리에 덮어쓰기 →
+        <a href="#" id="extensionsLink">chrome://extensions</a> 에서 새로고침
+      </div>
+    </div>
+  </div>
 
-function setupInteractionListener() {
-  document.addEventListener('click', (e) => {
-    const target = e.target.closest('button, [role="menuitem"], .SelectedMenuItem-menuItemContainer-PNDPtO'); 
-    if (!target) return;
-    const text = (target.innerText || target.textContent || "").trim();
-    let selected = null;
-    if (text === "보통" || text === "Normal" || text === "Reset") {
-      selected = 1.0;
-    } else if (/^(\d+)?(\.\d+)?x$/.test(text)) { 
-      selected = parseFloat(text.replace('x', ''));
-    }
-    if (selected !== null && !isNaN(selected)) {
-      userTargetRate = selected;
-      hasUserChangedSpeed = true;
-      const video = document.querySelector('video');
-      if (video) {
-        video.playbackRate = selected;
-        syncPlexUI(selected);
-      }
-    }
-  }, true);
-}
+  <div class="section">
+    <div class="row">
+      <span class="label-text">전체 기능 활성화</span>
+      <label class="switch"><input type="checkbox" id="masterSwitch"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <span style="font-size: 12px; color: #666;">브라우저 시작 시 자동 켜기</span>
+      <label class="switch"><input type="checkbox" id="autoResume"><span class="slider"></span></label>
+    </div>
+  </div>
 
-function startObserver() {
-  const observer = new MutationObserver(() => {
-    if (document.body.innerText.includes("NSES-UHX")) { window.history.back(); return; }
-    const video = document.querySelector('video');
-    if (video) {
-      if (sessionCheckTimeout) { clearTimeout(sessionCheckTimeout); sessionCheckTimeout = null; }
-      if (video.src !== lastVideoSrc) {
-        lastVideoSrc = video.src;
-        isProcessing = false;
-        window.netflixCreditFound = false;
+  <div class="section">
+    <div class="label-text" style="margin-bottom:6px;">대상 사이트 키워드</div>
+    <div class="input-group">
+      <input type="text" id="siteInput" placeholder="예: netflix">
+      <button id="addSite" class="btn add-btn">추가</button>
+    </div>
+    <div id="siteList"></div>
+  </div>
 
-        // [FIX] 이전 video 엘리먼트의 리스너를 명시적으로 제거 후 새 엘리먼트에 등록
-        if (trackedVideo) {
-          trackedVideo.removeEventListener('timeupdate', timeUpdateHandler);
-        }
-        trackedVideo = video;
+  <div class="section">
+    <div class="label-text">자동 클릭 키워드 (쉼표 구분)</div>
+    <input type="text" id="keywords" style="width: 100%; margin-top:5px;" placeholder="오프닝, 줄거리, 크레딧...">
+    <div class="speed-group">
+      <div class="speed-item">
+        <div class="label-text">Plex 배속 (자막 無)</div>
+        <select id="plexNoSub"></select>
+      </div>
+      <div class="speed-item">
+        <div class="label-text">Plex 배속 (자막 有)</div>
+        <select id="plexYesSub"></select>
+      </div>
+    </div>
+  </div>
 
-        startEnforceLoop(video);
-        if (window.location.hostname.includes('netflix')) {
-          video.addEventListener('timeupdate', timeUpdateHandler);
-        }
-      }
-    } else if (lastVideoSrc !== "") {
-      lastVideoSrc = ""; 
-      if (!sessionCheckTimeout) {
-        sessionCheckTimeout = setTimeout(() => {
-          if (!document.querySelector('video')) resetUserSession("재생창 이탈");
-          sessionCheckTimeout = null;
-        }, 30000);
-      }
-    }
-    if (!isProcessing) handleGenericButtons();
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-}
-
-function timeUpdateHandler(e) {
-  const video = e.target;
-
-  // [FIX] isProcessing 고착 방지: 넷플릭스 처리 타이머가 없는데 isProcessing이 true면 강제 해제
-  if (isProcessing) return;
-
-  const creditFound = window.netflixCreditFound || false;
-  let remainingTrigger = false;
-
-  // [FIX] Infinity/NaN 체크 추가
-  if (video.duration > 0 && isFinite(video.duration) && !isNaN(video.duration)) {
-    const remaining = video.duration - video.currentTime;
-    if (remaining > 0 && remaining <= 10) remainingTrigger = true;
-  }
-
-  if (!creditFound && !remainingTrigger) return;
-
-  const p = document.querySelector(`path[d="${NETFLIX_NEXT_PATH}"]`);
-  const btn = p?.closest('button') || p?.closest('[role="button"]');
-
-  if (btn && btn.offsetParent !== null) {
-    isProcessing = true;
-    // [FIX] 넷플릭스용 isProcessing 자동 해제 타이머 추가
-    if (netflixProcessingTimer) clearTimeout(netflixProcessingTimer);
-    netflixProcessingTimer = setTimeout(() => {
-      isProcessing = false;
-      netflixProcessingTimer = null;
-    }, 5000);
-    physicalClick(btn);
-  }
-}
-
-function handleGenericButtons() {
-  if (isProcessing) return;
-  const buttons = document.querySelectorAll('button, [role="button"], a.button');
-  for (const btn of buttons) {
-    const text = (btn.innerText || btn.textContent || "").trim();
-    if (config.keywords.some(k => k && text.includes(k)) && btn.offsetParent !== null) {
-      if (window.location.hostname.includes('netflix') && text.includes('크레딧')) window.netflixCreditFound = true;
-      if (window.location.hostname.includes('plex') && text.includes('크레딧')) {
-        const nextBtn = document.querySelector('[data-testid="nextButton"]');
-        if (nextBtn) { isProcessing = true; physicalClick(nextBtn); setTimeout(() => { isProcessing = false; }, 3000); return; }
-      } else { btn.click(); }
-    }
-  }
-}
-
-function physicalClick(element) {
-  const rect = element.getBoundingClientRect();
-  const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
-  ['mousedown', 'mouseup', 'click'].forEach(t => element.dispatchEvent(new MouseEvent(t, opts)));
-}
-
-function startEnforceLoop(video) {
-  if (enforceInterval) clearInterval(enforceInterval);
-  if (!window.location.hostname.includes('plex')) return;
-
-  // [FIX] 500ms → 1500ms로 완화 (기능 동일, CPU 부하 감소)
-  enforceInterval = setInterval(() => {
-    if (!video) { clearInterval(enforceInterval); return; }
-    let finalRate;
-    if (hasUserChangedSpeed && userTargetRate !== null) {
-      finalRate = userTargetRate;
-    } else {
-      const subElement = document.querySelector('[data-testid="subtitlesStream"]');
-      const hasSub = subElement ? !subElement.innerText.includes('없음') : false;
-      finalRate = hasSub ? config.plexYesSub : config.plexNoSub;
-    }
-    if (finalRate !== null && !isNaN(finalRate)) {
-      if (Math.abs(video.playbackRate - finalRate) > 0.01) video.playbackRate = finalRate;
-      syncPlexUI(finalRate);
-    }
-  }, 1500);
-}
-
-function resetUserSession(reason) {
-  userTargetRate = null;
-  hasUserChangedSpeed = false;
-  lastVideoSrc = "";
-  trackedVideo = null;
-  if (enforceInterval) clearInterval(enforceInterval);
-  // [FIX] 세션 리셋 시 넷플릭스 타이머도 함께 정리
-  if (netflixProcessingTimer) { clearTimeout(netflixProcessingTimer); netflixProcessingTimer = null; }
-  isProcessing = false;
-}
-
-function syncPlexUI(rate) {
-  const speedText = rate === 1 ? "보통" : `${rate}x`;
-  document.querySelectorAll('button[class*="DisclosureArrowButton-disclosureArrowButton"]').forEach(btn => {
-    const textNode = Array.from(btn.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
-    if (textNode && (textNode.textContent.trim() === "보통" || /^(\d+)?(\.\d+)?x$/.test(textNode.textContent.trim()))) {
-      if (textNode.textContent.trim() !== speedText) textNode.textContent = speedText;
-    }
-  });
-}
-
-// [FIX] 팝업에서 설정 변경 시 탭 리로드 없이 실시간 반영
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.keywords) config.keywords = changes.keywords.newValue.split(',').map(s => s.trim());
-  if (changes.plexNoSub) config.plexNoSub = parseFloat(changes.plexNoSub.newValue);
-  if (changes.plexYesSub) config.plexYesSub = parseFloat(changes.plexYesSub.newValue);
-  if (changes.masterSwitch && changes.masterSwitch.newValue === false) {
-    if (enforceInterval) clearInterval(enforceInterval);
-    resetUserSession("마스터 스위치 OFF");
-  }
-});
-
-window.addEventListener('popstate', () => resetUserSession("페이지 이동"));
-init();
+  <script src="popup.js"></script>
+</body>
+</html>
