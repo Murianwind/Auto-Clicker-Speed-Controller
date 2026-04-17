@@ -7,7 +7,13 @@ let userTargetRate = null;
 let hasUserChangedSpeed = false; 
 
 let enforceInterval = null;
-let sessionCheckTimeout = null; 
+let sessionCheckTimeout = null;
+
+// [FIX] 넷플릭스 isProcessing 고착 방지용 타이머
+let netflixProcessingTimer = null;
+
+// [FIX] video 엘리먼트 레퍼런스 추적 (리스너 누수 방지)
+let trackedVideo = null;
 
 const NETFLIX_NEXT_PATH = "M22 3h-2v18h2zm-17.71.62C3.29 3 2 3.72 2 4.89v14.22a1.5 1.5 0 0 0 2.29 1.27l11.54-7.1a1.5 1.5 0 0 0 0-2.56zM4 18.2V5.79L14.1 12z";
 
@@ -39,7 +45,7 @@ function setupInteractionListener() {
     }
     if (selected !== null && !isNaN(selected)) {
       userTargetRate = selected;
-      hasUserChangedSpeed = true; // 사용자가 개입했음을 마킹
+      hasUserChangedSpeed = true;
       const video = document.querySelector('video');
       if (video) {
         video.playbackRate = selected;
@@ -59,9 +65,15 @@ function startObserver() {
         lastVideoSrc = video.src;
         isProcessing = false;
         window.netflixCreditFound = false;
+
+        // [FIX] 이전 video 엘리먼트의 리스너를 명시적으로 제거 후 새 엘리먼트에 등록
+        if (trackedVideo) {
+          trackedVideo.removeEventListener('timeupdate', timeUpdateHandler);
+        }
+        trackedVideo = video;
+
         startEnforceLoop(video);
         if (window.location.hostname.includes('netflix')) {
-          video.removeEventListener('timeupdate', timeUpdateHandler);
           video.addEventListener('timeupdate', timeUpdateHandler);
         }
       }
@@ -71,7 +83,7 @@ function startObserver() {
         sessionCheckTimeout = setTimeout(() => {
           if (!document.querySelector('video')) resetUserSession("재생창 이탈");
           sessionCheckTimeout = null;
-        }, 30000); // 자동 재생 로딩을 고려해 30초 대기
+        }, 30000);
       }
     }
     if (!isProcessing) handleGenericButtons();
@@ -81,18 +93,33 @@ function startObserver() {
 
 function timeUpdateHandler(e) {
   const video = e.target;
-  let triggerNext = window.netflixCreditFound || false;
-  if (video.duration > 0 && !isNaN(video.duration)) {
+
+  // [FIX] isProcessing 고착 방지: 넷플릭스 처리 타이머가 없는데 isProcessing이 true면 강제 해제
+  if (isProcessing) return;
+
+  const creditFound = window.netflixCreditFound || false;
+  let remainingTrigger = false;
+
+  // [FIX] Infinity/NaN 체크 추가
+  if (video.duration > 0 && isFinite(video.duration) && !isNaN(video.duration)) {
     const remaining = video.duration - video.currentTime;
-    if (remaining > 0 && remaining <= 10) triggerNext = true;
+    if (remaining > 0 && remaining <= 10) remainingTrigger = true;
   }
-  if (triggerNext && !isProcessing) {
-    const p = document.querySelector(`path[d="${NETFLIX_NEXT_PATH}"]`);
-    const btn = p?.closest('button') || p?.closest('[role="button"]');
-    if (btn && btn.offsetParent !== null) {
-      isProcessing = true;
-      physicalClick(btn);
-    }
+
+  if (!creditFound && !remainingTrigger) return;
+
+  const p = document.querySelector(`path[d="${NETFLIX_NEXT_PATH}"]`);
+  const btn = p?.closest('button') || p?.closest('[role="button"]');
+
+  if (btn && btn.offsetParent !== null) {
+    isProcessing = true;
+    // [FIX] 넷플릭스용 isProcessing 자동 해제 타이머 추가
+    if (netflixProcessingTimer) clearTimeout(netflixProcessingTimer);
+    netflixProcessingTimer = setTimeout(() => {
+      isProcessing = false;
+      netflixProcessingTimer = null;
+    }, 5000);
+    physicalClick(btn);
   }
 }
 
@@ -119,12 +146,12 @@ function physicalClick(element) {
 
 function startEnforceLoop(video) {
   if (enforceInterval) clearInterval(enforceInterval);
-  if (!window.location.hostname.includes('plex')) return; // Plex 외 타 사이트 배속 강제 금지
+  if (!window.location.hostname.includes('plex')) return;
 
+  // [FIX] 500ms → 1500ms로 완화 (기능 동일, CPU 부하 감소)
   enforceInterval = setInterval(() => {
     if (!video) { clearInterval(enforceInterval); return; }
     let finalRate;
-    // 사용자가 설정한 값이 있으면 그것을 최우선으로 사용 (자동 재생 후에도 유지)
     if (hasUserChangedSpeed && userTargetRate !== null) {
       finalRate = userTargetRate;
     } else {
@@ -136,14 +163,18 @@ function startEnforceLoop(video) {
       if (Math.abs(video.playbackRate - finalRate) > 0.01) video.playbackRate = finalRate;
       syncPlexUI(finalRate);
     }
-  }, 500);
+  }, 1500);
 }
 
 function resetUserSession(reason) {
   userTargetRate = null;
   hasUserChangedSpeed = false;
   lastVideoSrc = "";
+  trackedVideo = null;
   if (enforceInterval) clearInterval(enforceInterval);
+  // [FIX] 세션 리셋 시 넷플릭스 타이머도 함께 정리
+  if (netflixProcessingTimer) { clearTimeout(netflixProcessingTimer); netflixProcessingTimer = null; }
+  isProcessing = false;
 }
 
 function syncPlexUI(rate) {
@@ -155,6 +186,17 @@ function syncPlexUI(rate) {
     }
   });
 }
+
+// [FIX] 팝업에서 설정 변경 시 탭 리로드 없이 실시간 반영
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.keywords) config.keywords = changes.keywords.newValue.split(',').map(s => s.trim());
+  if (changes.plexNoSub) config.plexNoSub = parseFloat(changes.plexNoSub.newValue);
+  if (changes.plexYesSub) config.plexYesSub = parseFloat(changes.plexYesSub.newValue);
+  if (changes.masterSwitch && changes.masterSwitch.newValue === false) {
+    if (enforceInterval) clearInterval(enforceInterval);
+    resetUserSession("마스터 스위치 OFF");
+  }
+});
 
 window.addEventListener('popstate', () => resetUserSession("페이지 이동"));
 init();
