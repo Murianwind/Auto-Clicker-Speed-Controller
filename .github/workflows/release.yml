@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write  # ← 추가
+
 jobs:
   test:
     uses: ./.github/workflows/main.yml
