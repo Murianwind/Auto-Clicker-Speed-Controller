@@ -53,7 +53,7 @@ async function checkUpdate() {
     const release = await res.json();
     const latestTag = release.tag_name;           // e.g. "v3.4"
     const currentVersion = chrome.runtime.getManifest().version; // e.g. "3.3"
-    const latestVersion = latestTag.replace(/^v/, "");
+    const latestVersion = latestTag.replace(/^[vV]/, "");
 
     // zip asset 찾기
     const zipAsset = release.assets?.find(a => a.name.endsWith('.zip'));
