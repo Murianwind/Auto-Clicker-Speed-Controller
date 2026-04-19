@@ -4,7 +4,13 @@
   <meta charset="UTF-8">
   <style>
     body { width: 350px; font-family: sans-serif; padding: 10px; background: #f9f9f9; margin: 0; overflow: hidden; }
-    h2 { font-size: 15px; text-align: center; color: #333; margin: 5px 0 12px 0; }
+
+    /* 제목 영역 */
+    .title-row { display: flex; justify-content: center; align-items: center; position: relative; margin: 5px 0 12px 0; }
+    .title-row h2 { font-size: 15px; color: #333; margin: 0; }
+    .bug-btn { position: absolute; right: 0; width: 22px; height: 22px; border-radius: 50%; border: 1px solid #ddd; background: white; color: #f57c00; font-size: 12px; font-weight: bold; cursor: pointer; line-height: 20px; text-align: center; padding: 0; }
+    .bug-btn:hover { background: #fff8e1; border-color: #f57c00; }
+
     .section { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 10px; }
     .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     .row:last-child { margin-bottom: 0; }
@@ -29,27 +35,26 @@
     /* 업데이트 섹션 */
     #updateSection { display: none; }
     #updateSection.visible { display: block; }
-
     .update-row { display: flex; justify-content: space-between; align-items: center; }
     .update-badge { font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 10px; }
     .badge-new { background: #e8f5e9; color: #2e7d32; }
     .badge-latest { background: #f0f0f0; color: #888; }
     .badge-checking { background: #fff8e1; color: #f57c00; }
     .badge-error { background: #fdecea; color: #c62828; }
-
     .download-btn { height: 26px; padding: 0 10px; font-size: 11px; font-weight: bold; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; }
     .download-btn:hover { background: #1565c0; }
     .download-btn:disabled { background: #ccc; cursor: default; }
-
     .update-guide { font-size: 11px; color: #888; margin-top: 6px; line-height: 1.5; border-top: 1px solid #eee; padding-top: 6px; }
     .update-guide a { color: #1976d2; text-decoration: none; }
     .update-guide a:hover { text-decoration: underline; }
-
     .version-text { font-size: 11px; color: #aaa; }
   </style>
 </head>
 <body>
-  <h2>Auto Clicker & Speed Controller</h2>
+  <div class="title-row">
+    <h2>Auto Clicker & Speed Controller</h2>
+    <button class="bug-btn" id="bugReportBtn" title="버그 제보">!</button>
+  </div>
 
   <!-- 업데이트 섹션 -->
   <div class="section" id="updateSection">
@@ -102,6 +107,11 @@
         <select id="plexYesSub"></select>
       </div>
     </div>
+  </div>
+
+  <div class="section" style="padding: 5px; text-align: center; background: none; box-shadow: none;">
+    <button id="downloadLog" class="btn" style="width: 100%; background-color: #555; font-size: 11px;">디버그 로그 다운로드 (.txt)</button>
+    <button id="clearLog" class="btn" style="width: 100%; background-color: #bbb; font-size: 11px; margin-top: 5px;">로그 삭제</button>
   </div>
 
   <script src="popup.js"></script>
