@@ -6,7 +6,8 @@ const defaults = {
   keywords: "오프닝,줄거리,크레딧",
   allowedSites: [],
   plexNoSub: "1",
-  plexYesSub: "1"
+  plexYesSub: "1",
+  netflixSkipSeconds: 10
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -27,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     noSubSelect.value = items.plexNoSub;
     yesSubSelect.value = items.plexYesSub;
+    document.getElementById('netflixSkipSeconds').value = items.netflixSkipSeconds;
     renderSites(items.allowedSites);
   });
 
@@ -101,7 +103,7 @@ document.getElementById('extensionsLink').addEventListener('click', (e) => {
   chrome.tabs.create({ url: "chrome://extensions" });
 });
 
-// ── 결함 제보 ─────────────────────────────────────────────────
+// ── 버그 제보 ─────────────────────────────────────────────────
 document.getElementById('bugReportBtn').addEventListener('click', async () => {
   chrome.storage.local.get({ debugLogs: [] }, async (result) => {
     // 1. 기존 디버그 로그 다운로드 버튼과 동일한 방식으로 저장
@@ -146,7 +148,7 @@ document.getElementById('bugReportBtn').addEventListener('click', async () => {
       `(여기에 문제 상황을 설명해 주세요)`,
     ].join('\n');
 
-    const title = encodeURIComponent('[결함] ');
+    const title = encodeURIComponent('[버그] ');
     const encodedBody = encodeURIComponent(body);
 
     // 3. 이슈 페이지 열기
@@ -165,7 +167,10 @@ function saveSettings() {
   const keywords = document.getElementById('keywords').value;
   const plexNoSub = document.getElementById('plexNoSub').value;
   const plexYesSub = document.getElementById('plexYesSub').value;
-  chrome.storage.sync.set({ masterSwitch, autoResume, keywords, plexNoSub, plexYesSub });
+  const raw = parseInt(document.getElementById('netflixSkipSeconds').value);
+  const netflixSkipSeconds = (!isNaN(raw) && raw >= 5 && raw <= 30) ? raw : 10;
+  document.getElementById('netflixSkipSeconds').value = netflixSkipSeconds;
+  chrome.storage.sync.set({ masterSwitch, autoResume, keywords, plexNoSub, plexYesSub, netflixSkipSeconds });
 }
 
 document.getElementById('masterSwitch').addEventListener('change', saveSettings);
@@ -173,6 +178,7 @@ document.getElementById('autoResume').addEventListener('change', saveSettings);
 document.getElementById('keywords').addEventListener('change', saveSettings);
 document.getElementById('plexNoSub').addEventListener('change', saveSettings);
 document.getElementById('plexYesSub').addEventListener('change', saveSettings);
+document.getElementById('netflixSkipSeconds').addEventListener('change', saveSettings);
 
 document.getElementById('addSite').addEventListener('click', () => {
   const input = document.getElementById('siteInput');
