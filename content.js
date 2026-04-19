@@ -2,20 +2,36 @@ let config = { keywords: [], masterSwitch: true, plexNoSub: null, plexYesSub: nu
 let lastVideoSrc = "";
 let isProcessing = false;
 
-// 사용자가 설정한 배속을 세션 내내 기억하기 위한 변수
 let userTargetRate = null;      
 let hasUserChangedSpeed = false; 
 
 let enforceInterval = null;
 let sessionCheckTimeout = null;
 
-// [FIX] 넷플릭스 isProcessing 고착 방지용 타이머
 let netflixProcessingTimer = null;
-
-// [FIX] video 엘리먼트 레퍼런스 추적 (리스너 누수 방지)
 let trackedVideo = null;
 
 const NETFLIX_NEXT_PATH = "M22 3h-2v18h2zm-17.71.62C3.29 3 2 3.72 2 4.89v14.22a1.5 1.5 0 0 0 2.29 1.27l11.54-7.1a1.5 1.5 0 0 0 0-2.56zM4 18.2V5.79L14.1 12z";
+
+// ── 로그 ─────────────────────────────────────────────────────
+const MAX_LOG = 100; // 최대 보관 로그 수
+
+function addLog(type, message) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const ampm = now.getHours() < 12 ? '오전' : '오후';
+  const h = now.getHours() % 12 || 12;
+  const timestamp = `[${now.getFullYear()}. ${now.getMonth()+1}. ${now.getDate()}. ${ampm} ${h}:${pad(now.getMinutes())}:${pad(now.getSeconds())}]`;
+  const url = window.location.href;
+  const line = `${timestamp} [${type}] ${message} | URL: ${url}`;
+
+  chrome.storage.local.get({ debugLogs: [] }, (items) => {
+    const log = items.debugLogs;
+    log.push(line);
+    if (log.length > MAX_LOG) log.splice(0, log.length - MAX_LOG);
+    chrome.storage.local.set({ debugLogs: log });
+  });
+}
 
 function init() {
   chrome.storage.sync.get(['masterSwitch', 'allowedSites', 'keywords', 'plexNoSub', 'plexYesSub'], (items) => {
@@ -66,7 +82,6 @@ function startObserver() {
         isProcessing = false;
         window.netflixCreditFound = false;
 
-        // [FIX] 이전 video 엘리먼트의 리스너를 명시적으로 제거 후 새 엘리먼트에 등록
         if (trackedVideo) {
           trackedVideo.removeEventListener('timeupdate', timeUpdateHandler);
         }
@@ -93,14 +108,11 @@ function startObserver() {
 
 function timeUpdateHandler(e) {
   const video = e.target;
-
-  // [FIX] isProcessing 고착 방지: 넷플릭스 처리 타이머가 없는데 isProcessing이 true면 강제 해제
   if (isProcessing) return;
 
   const creditFound = window.netflixCreditFound || false;
   let remainingTrigger = false;
 
-  // [FIX] Infinity/NaN 체크 추가
   if (video.duration > 0 && isFinite(video.duration) && !isNaN(video.duration)) {
     const remaining = video.duration - video.currentTime;
     if (remaining > 0 && remaining <= 10) remainingTrigger = true;
@@ -113,13 +125,15 @@ function timeUpdateHandler(e) {
 
   if (btn && btn.offsetParent !== null) {
     isProcessing = true;
-    // [FIX] 넷플릭스용 isProcessing 자동 해제 타이머 추가
     if (netflixProcessingTimer) clearTimeout(netflixProcessingTimer);
     netflixProcessingTimer = setTimeout(() => {
       isProcessing = false;
       netflixProcessingTimer = null;
     }, 5000);
     physicalClick(btn);
+  } else {
+    // 버튼이 없는 경우 오류 로그
+    addLog('오류', '다음 화 버튼을 찾을 수 없음 (OSD 확인 필요)');
   }
 }
 
@@ -129,11 +143,21 @@ function handleGenericButtons() {
   for (const btn of buttons) {
     const text = (btn.innerText || btn.textContent || "").trim();
     if (config.keywords.some(k => k && text.includes(k)) && btn.offsetParent !== null) {
+      const matchedKeyword = config.keywords.find(k => k && text.includes(k));
       if (window.location.hostname.includes('netflix') && text.includes('크레딧')) window.netflixCreditFound = true;
       if (window.location.hostname.includes('plex') && text.includes('크레딧')) {
         const nextBtn = document.querySelector('[data-testid="nextButton"]');
-        if (nextBtn) { isProcessing = true; physicalClick(nextBtn); setTimeout(() => { isProcessing = false; }, 3000); return; }
-      } else { btn.click(); }
+        if (nextBtn) {
+          isProcessing = true;
+          addLog('자동클릭', `키워드: "${matchedKeyword}" | 내용: "${text}"`);
+          physicalClick(nextBtn);
+          setTimeout(() => { isProcessing = false; }, 3000);
+          return;
+        }
+      } else {
+        addLog('자동클릭', `키워드: "${matchedKeyword}" | 내용: "${text}"`);
+        btn.click();
+      }
     }
   }
 }
@@ -148,7 +172,6 @@ function startEnforceLoop(video) {
   if (enforceInterval) clearInterval(enforceInterval);
   if (!window.location.hostname.includes('plex')) return;
 
-  // [FIX] 500ms → 1500ms로 완화 (기능 동일, CPU 부하 감소)
   enforceInterval = setInterval(() => {
     if (!video) { clearInterval(enforceInterval); return; }
     let finalRate;
@@ -172,7 +195,6 @@ function resetUserSession(reason) {
   lastVideoSrc = "";
   trackedVideo = null;
   if (enforceInterval) clearInterval(enforceInterval);
-  // [FIX] 세션 리셋 시 넷플릭스 타이머도 함께 정리
   if (netflixProcessingTimer) { clearTimeout(netflixProcessingTimer); netflixProcessingTimer = null; }
   isProcessing = false;
 }
@@ -187,7 +209,6 @@ function syncPlexUI(rate) {
   });
 }
 
-// [FIX] 팝업에서 설정 변경 시 탭 리로드 없이 실시간 반영
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.keywords) config.keywords = changes.keywords.newValue.split(',').map(s => s.trim());
   if (changes.plexNoSub) config.plexNoSub = parseFloat(changes.plexNoSub.newValue);
