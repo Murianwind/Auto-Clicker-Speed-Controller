@@ -1,4 +1,4 @@
-let config = { keywords: [], masterSwitch: true, plexNoSub: null, plexYesSub: null };
+let config = { keywords: [], masterSwitch: true, plexNoSub: null, plexYesSub: null, netflixSkipSeconds: 10 };
 let lastVideoSrc = "";
 let isProcessing = false;
 
@@ -31,7 +31,7 @@ function addLog(type, message) {
 
 // ── 초기화 ────────────────────────────────────────────────────
 function init() {
-  chrome.storage.sync.get(['masterSwitch', 'allowedSites', 'keywords', 'plexNoSub', 'plexYesSub'], (items) => {
+  chrome.storage.sync.get(['masterSwitch', 'allowedSites', 'keywords', 'plexNoSub', 'plexYesSub', 'netflixSkipSeconds'], (items) => {
     if (items.masterSwitch === false) return;
     const currentUrl = window.location.href.toLowerCase();
     const isMatched = (items.allowedSites || []).some(site => site && currentUrl.includes(site.toLowerCase()));
@@ -39,6 +39,7 @@ function init() {
       config.keywords = (items.keywords || "").split(',').map(s => s.trim());
       config.plexNoSub = items.plexNoSub ? parseFloat(items.plexNoSub) : null;
       config.plexYesSub = items.plexYesSub ? parseFloat(items.plexYesSub) : null;
+      config.netflixSkipSeconds = items.netflixSkipSeconds ? parseInt(items.netflixSkipSeconds) : 10;
       setupInteractionListener();
       startObserver();
     }
@@ -157,7 +158,7 @@ function timeUpdateHandler(e) {
   let remainingTrigger = false;
   if (video.duration > 0 && isFinite(video.duration) && !isNaN(video.duration)) {
     const remaining = video.duration - video.currentTime;
-    if (remaining > 0 && remaining <= 10) remainingTrigger = true;
+    if (remaining > 0 && remaining <= config.netflixSkipSeconds) remainingTrigger = true;
   }
 
   if (!creditFound && !remainingTrigger) return;
@@ -182,7 +183,7 @@ function handleGenericButtons() {
     const video = document.querySelector('video');
     const remaining = (video && isFinite(video.duration) && video.duration > 0)
       ? video.duration - video.currentTime : Infinity;
-    if (remaining <= 10) {
+    if (remaining <= config.netflixSkipSeconds) {
       const p = document.querySelector(`path[d="${NETFLIX_NEXT_PATH}"]`);
       const btn = p?.closest('button') || p?.closest('[role="button"]');
       if (btn) {
@@ -279,6 +280,7 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.keywords) config.keywords = changes.keywords.newValue.split(',').map(s => s.trim());
   if (changes.plexNoSub) config.plexNoSub = parseFloat(changes.plexNoSub.newValue);
   if (changes.plexYesSub) config.plexYesSub = parseFloat(changes.plexYesSub.newValue);
+  if (changes.netflixSkipSeconds) config.netflixSkipSeconds = parseInt(changes.netflixSkipSeconds.newValue) || 10;
   if (changes.masterSwitch && changes.masterSwitch.newValue === false) {
     if (enforceInterval) clearInterval(enforceInterval);
     resetUserSession("마스터 스위치 OFF");
