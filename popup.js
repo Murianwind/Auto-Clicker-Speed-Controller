@@ -101,7 +101,7 @@ document.getElementById('extensionsLink').addEventListener('click', (e) => {
   chrome.tabs.create({ url: "chrome://extensions" });
 });
 
-// ── 버그 제보 ─────────────────────────────────────────────────
+// ── 결함 제보 ─────────────────────────────────────────────────
 document.getElementById('bugReportBtn').addEventListener('click', async () => {
   chrome.storage.local.get({ debugLogs: [] }, async (result) => {
     // 1. 기존 디버그 로그 다운로드 버튼과 동일한 방식으로 저장
@@ -146,7 +146,7 @@ document.getElementById('bugReportBtn').addEventListener('click', async () => {
       `(여기에 문제 상황을 설명해 주세요)`,
     ].join('\n');
 
-    const title = encodeURIComponent('[버그] ');
+    const title = encodeURIComponent('[결함] ');
     const encodedBody = encodeURIComponent(body);
 
     // 3. 이슈 페이지 열기
