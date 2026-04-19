@@ -1,4 +1,4 @@
-const GITHUB_REPO = "Murianwind/Auto-Clicker-Speed-Controller"; // 본인 저장소로 변경
+const GITHUB_REPO = "Murianwind/Auto-Clicker-Speed-Controller";
 
 const defaults = {
   masterSwitch: true,
@@ -51,11 +51,9 @@ async function checkUpdate() {
     if (!res.ok) throw new Error(`GitHub API ${res.status}`);
 
     const release = await res.json();
-    const latestTag = release.tag_name;           // e.g. "v3.4"
-    const currentVersion = chrome.runtime.getManifest().version; // e.g. "3.3"
+    const latestTag = release.tag_name;
+    const currentVersion = chrome.runtime.getManifest().version;
     const latestVersion = latestTag.replace(/^[vV]/, "");
-
-    // zip asset 찾기
     const zipAsset = release.assets?.find(a => a.name.endsWith('.zip'));
 
     if (latestVersion === currentVersion) {
@@ -73,7 +71,7 @@ async function checkUpdate() {
           downloadBtn.textContent = "다운로드 중...";
           chrome.downloads.download(
             { url: zipAsset.browser_download_url, filename: zipAsset.name },
-            (id) => {
+            () => {
               if (chrome.runtime.lastError) {
                 downloadBtn.disabled = false;
                 downloadBtn.textContent = "zip 다운로드";
@@ -86,7 +84,6 @@ async function checkUpdate() {
           );
         });
       } else {
-        // zip asset이 없으면 GitHub 릴리스 페이지로 이동
         downloadBtn.textContent = "릴리스 페이지";
         downloadBtn.addEventListener('click', () => {
           chrome.tabs.create({ url: release.html_url });
@@ -99,10 +96,55 @@ async function checkUpdate() {
   }
 }
 
-// chrome://extensions 링크 처리
 document.getElementById('extensionsLink').addEventListener('click', (e) => {
   e.preventDefault();
   chrome.tabs.create({ url: "chrome://extensions" });
+});
+
+// ── 버그 제보 ─────────────────────────────────────────────────
+document.getElementById('bugReportBtn').addEventListener('click', async () => {
+  const manifest = chrome.runtime.getManifest();
+  const currentVersion = manifest.version;
+  const chromeVersion = navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1] || "(알 수 없음)";
+  const os = navigator.userAgent.includes("Win") ? "Windows"
+            : navigator.userAgent.includes("Mac") ? "macOS"
+            : navigator.userAgent.includes("Linux") ? "Linux" : "(알 수 없음)";
+
+  const [syncItems, localItems] = await Promise.all([
+    new Promise(resolve => chrome.storage.sync.get(defaults, resolve)),
+    new Promise(resolve => chrome.storage.local.get({ debugLogs: [] }, resolve))
+  ]);
+
+  const recentLog = localItems.debugLogs.slice(-30);
+
+  const body = [
+    `### 환경 정보`,
+    `- 확장 프로그램 버전: v${currentVersion}`,
+    `- 크롬 버전: ${chromeVersion}`,
+    `- OS: ${os}`,
+    ``,
+    `### 현재 설정`,
+    `- 전체 기능 활성화: ${syncItems.masterSwitch}`,
+    `- 브라우저 시작 시 자동 켜기: ${syncItems.autoResume}`,
+    `- 대상 사이트: ${(syncItems.allowedSites || []).join(", ") || "(없음)"}`,
+    `- 자동 클릭 키워드: ${syncItems.keywords}`,
+    `- Plex 배속 (자막 無): ${syncItems.plexNoSub}x`,
+    `- Plex 배속 (자막 有): ${syncItems.plexYesSub}x`,
+    ``,
+    `### 최근 로그 (최대 30줄)`,
+    `\`\`\``,
+    recentLog.length > 0 ? recentLog.join('\n') : '(로그 없음)',
+    `\`\`\``,
+    ``,
+    `### 문제 설명`,
+    `(여기에 문제 상황을 설명해 주세요)`,
+  ].join('\n');
+
+  const title = encodeURIComponent(`[버그] `);
+  const encodedBody = encodeURIComponent(body);
+  chrome.tabs.create({
+    url: `https://github.com/${GITHUB_REPO}/issues/new?title=${title}&body=${encodedBody}`
+  });
 });
 
 // ── 설정 저장 ─────────────────────────────────────────────────
@@ -157,5 +199,28 @@ document.getElementById('siteList').addEventListener('click', (e) => {
         saveSettings();
       });
     });
+  }
+});
+
+// ── 디버그 로그 다운로드 / 삭제 ───────────────────────────────
+document.getElementById('downloadLog').addEventListener('click', () => {
+  chrome.storage.local.get({ debugLogs: [] }, (result) => {
+    if (result.debugLogs.length === 0) {
+      alert("기록된 로그가 없습니다.");
+      return;
+    }
+    const blob = new Blob([result.debugLogs.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stream_master_log_${new Date().getTime()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+});
+
+document.getElementById('clearLog').addEventListener('click', () => {
+  if (confirm("모든 로그를 삭제하시겠습니까?")) {
+    chrome.storage.local.set({ debugLogs: [] }, () => alert("삭제되었습니다."));
   }
 });
