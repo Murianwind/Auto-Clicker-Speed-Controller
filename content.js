@@ -7,24 +7,20 @@ let hasUserChangedSpeed = false;
 
 let enforceInterval = null;
 let sessionCheckTimeout = null;
-
 let netflixProcessingTimer = null;
 let trackedVideo = null;
 
 const NETFLIX_NEXT_PATH = "M22 3h-2v18h2zm-17.71.62C3.29 3 2 3.72 2 4.89v14.22a1.5 1.5 0 0 0 2.29 1.27l11.54-7.1a1.5 1.5 0 0 0 0-2.56zM4 18.2V5.79L14.1 12z";
+const MAX_LOG = 100;
 
 // ── 로그 ─────────────────────────────────────────────────────
-const MAX_LOG = 100; // 최대 보관 로그 수
-
 function addLog(type, message) {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const ampm = now.getHours() < 12 ? '오전' : '오후';
   const h = now.getHours() % 12 || 12;
   const timestamp = `[${now.getFullYear()}. ${now.getMonth()+1}. ${now.getDate()}. ${ampm} ${h}:${pad(now.getMinutes())}:${pad(now.getSeconds())}]`;
-  const url = window.location.href;
-  const line = `${timestamp} [${type}] ${message} | URL: ${url}`;
-
+  const line = `${timestamp} [${type}] ${message} | URL: ${window.location.href}`;
   chrome.storage.local.get({ debugLogs: [] }, (items) => {
     const log = items.debugLogs;
     log.push(line);
@@ -33,6 +29,7 @@ function addLog(type, message) {
   });
 }
 
+// ── 초기화 ────────────────────────────────────────────────────
 function init() {
   chrome.storage.sync.get(['masterSwitch', 'allowedSites', 'keywords', 'plexNoSub', 'plexYesSub'], (items) => {
     if (items.masterSwitch === false) return;
@@ -48,6 +45,7 @@ function init() {
   });
 }
 
+// ── Plex 배속 수동 변경 감지 ──────────────────────────────────
 function setupInteractionListener() {
   document.addEventListener('click', (e) => {
     const target = e.target.closest('button, [role="menuitem"], .SelectedMenuItem-menuItemContainer-PNDPtO'); 
@@ -71,9 +69,21 @@ function setupInteractionListener() {
   }, true);
 }
 
+// ── DOM 변경 감시 ─────────────────────────────────────────────
 function startObserver() {
   const observer = new MutationObserver(() => {
     if (document.body.innerText.includes("NSES-UHX")) { window.history.back(); return; }
+
+    // 마지막 화 이후 크레딧 화면("다음 화" 버튼)이 나타나면 뒤로가기
+    if (window.location.hostname.includes('netflix')) {
+      const seamlessBtn = document.querySelector('[data-uia="next-episode-seamless-button"]');
+      if (seamlessBtn) {
+        addLog('자동이동', '마지막 화 크레딧 화면 감지 - 뒤로가기');
+        window.history.back();
+        return;
+      }
+    }
+
     const video = document.querySelector('video');
     if (video) {
       if (sessionCheckTimeout) { clearTimeout(sessionCheckTimeout); sessionCheckTimeout = null; }
@@ -81,19 +91,15 @@ function startObserver() {
         lastVideoSrc = video.src;
         isProcessing = false;
         window.netflixCreditFound = false;
-
-        if (trackedVideo) {
-          trackedVideo.removeEventListener('timeupdate', timeUpdateHandler);
-        }
+        if (trackedVideo) trackedVideo.removeEventListener('timeupdate', timeUpdateHandler);
         trackedVideo = video;
-
         startEnforceLoop(video);
         if (window.location.hostname.includes('netflix')) {
           video.addEventListener('timeupdate', timeUpdateHandler);
         }
       }
     } else if (lastVideoSrc !== "") {
-      lastVideoSrc = ""; 
+      lastVideoSrc = "";
       if (!sessionCheckTimeout) {
         sessionCheckTimeout = setTimeout(() => {
           if (!document.querySelector('video')) resetUserSession("재생창 이탈");
@@ -106,13 +112,49 @@ function startObserver() {
   observer.observe(document.body, { childList: true, subtree: true });
 }
 
+// ── Netflix: 네이티브 pause/play 콤보로 OSD 활성화 후 다음화 클릭 ──
+function triggerNativePausePlay(video) {
+  try {
+    // 1. 네이티브 video.pause() - CSP 우회 가능
+    video.pause();
+
+    // 2. 50ms 후 재생 재개 → 넷플릭스 UI가 OSD를 렌더링
+    setTimeout(() => {
+      video.play().catch(e => {});
+
+      // 3. OSD 렌더링 대기 후 다음화 버튼 탐색 (SVG 경로 기준)
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        const p = document.querySelector(`path[d="${NETFLIX_NEXT_PATH}"]`);
+        const btn = p?.closest('button') || p?.closest('[role="button"]');
+
+        if (btn) {
+          clearInterval(interval);
+          addLog('자동클릭', `다음화 버튼 클릭 (OSD 활성화 후 ${attempts}회 탐색)`);
+          physicalClick(btn);
+        } else if (attempts >= 50) {
+          clearInterval(interval);
+          addLog('오류', 'OSD 활성화 후 다음화 버튼을 찾을 수 없음');
+          isProcessing = false;
+          if (netflixProcessingTimer) { clearTimeout(netflixProcessingTimer); netflixProcessingTimer = null; }
+        }
+      }, 200);
+    }, 50);
+
+  } catch(e) {
+    addLog('오류', `넷플릭스 pause/play 오류: ${e.message}`);
+    isProcessing = false;
+  }
+}
+
+// ── Netflix 다음화: timeupdate 기반 (잔여 10초) ───────────────
 function timeUpdateHandler(e) {
   const video = e.target;
   if (isProcessing) return;
 
   const creditFound = window.netflixCreditFound || false;
   let remainingTrigger = false;
-
   if (video.duration > 0 && isFinite(video.duration) && !isNaN(video.duration)) {
     const remaining = video.duration - video.currentTime;
     if (remaining > 0 && remaining <= 10) remainingTrigger = true;
@@ -120,31 +162,51 @@ function timeUpdateHandler(e) {
 
   if (!creditFound && !remainingTrigger) return;
 
-  const p = document.querySelector(`path[d="${NETFLIX_NEXT_PATH}"]`);
-  const btn = p?.closest('button') || p?.closest('[role="button"]');
+  isProcessing = true;
+  if (netflixProcessingTimer) clearTimeout(netflixProcessingTimer);
+  netflixProcessingTimer = setTimeout(() => {
+    isProcessing = false;
+    netflixProcessingTimer = null;
+  }, 12000);
 
-  if (btn && btn.offsetParent !== null) {
-    isProcessing = true;
-    if (netflixProcessingTimer) clearTimeout(netflixProcessingTimer);
-    netflixProcessingTimer = setTimeout(() => {
-      isProcessing = false;
-      netflixProcessingTimer = null;
-    }, 5000);
-    physicalClick(btn);
-  } else {
-    // 버튼이 없는 경우 오류 로그
-    addLog('오류', '다음 화 버튼을 찾을 수 없음 (OSD 확인 필요)');
-  }
+  addLog('자동넘기기', '종료 10초 전 감지 - 네이티브 pause/play 콤보 실행');
+  triggerNativePausePlay(video);
 }
 
+// ── 키워드 버튼 자동클릭 ─────────────────────────────────────
 function handleGenericButtons() {
   if (isProcessing) return;
+
+  // MutationObserver에서도 OSD 다음화 버튼 감지 (잔여 10초 이하)
+  if (window.location.hostname.includes('netflix')) {
+    const video = document.querySelector('video');
+    const remaining = (video && isFinite(video.duration) && video.duration > 0)
+      ? video.duration - video.currentTime : Infinity;
+    if (remaining <= 10) {
+      const p = document.querySelector(`path[d="${NETFLIX_NEXT_PATH}"]`);
+      const btn = p?.closest('button') || p?.closest('[role="button"]');
+      if (btn) {
+        isProcessing = true;
+        if (netflixProcessingTimer) clearTimeout(netflixProcessingTimer);
+        netflixProcessingTimer = setTimeout(() => {
+          isProcessing = false;
+          netflixProcessingTimer = null;
+        }, 5000);
+        addLog('자동클릭', '다음화 버튼 (MutationObserver 감지)');
+        physicalClick(btn);
+        return;
+      }
+    }
+  }
+
   const buttons = document.querySelectorAll('button, [role="button"], a.button');
   for (const btn of buttons) {
     const text = (btn.innerText || btn.textContent || "").trim();
     if (config.keywords.some(k => k && text.includes(k)) && btn.offsetParent !== null) {
       const matchedKeyword = config.keywords.find(k => k && text.includes(k));
-      if (window.location.hostname.includes('netflix') && text.includes('크레딧')) window.netflixCreditFound = true;
+      if (window.location.hostname.includes('netflix') && text.includes('크레딧')) {
+        window.netflixCreditFound = true;
+      }
       if (window.location.hostname.includes('plex') && text.includes('크레딧')) {
         const nextBtn = document.querySelector('[data-testid="nextButton"]');
         if (nextBtn) {
@@ -162,16 +224,17 @@ function handleGenericButtons() {
   }
 }
 
+// ── 물리 클릭 ─────────────────────────────────────────────────
 function physicalClick(element) {
   const rect = element.getBoundingClientRect();
   const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
   ['mousedown', 'mouseup', 'click'].forEach(t => element.dispatchEvent(new MouseEvent(t, opts)));
 }
 
+// ── Plex 배속 강제 루프 ───────────────────────────────────────
 function startEnforceLoop(video) {
   if (enforceInterval) clearInterval(enforceInterval);
   if (!window.location.hostname.includes('plex')) return;
-
   enforceInterval = setInterval(() => {
     if (!video) { clearInterval(enforceInterval); return; }
     let finalRate;
@@ -189,6 +252,7 @@ function startEnforceLoop(video) {
   }, 1500);
 }
 
+// ── 세션 리셋 ─────────────────────────────────────────────────
 function resetUserSession(reason) {
   userTargetRate = null;
   hasUserChangedSpeed = false;
@@ -199,6 +263,7 @@ function resetUserSession(reason) {
   isProcessing = false;
 }
 
+// ── Plex UI 배속 텍스트 동기화 ───────────────────────────────
 function syncPlexUI(rate) {
   const speedText = rate === 1 ? "보통" : `${rate}x`;
   document.querySelectorAll('button[class*="DisclosureArrowButton-disclosureArrowButton"]').forEach(btn => {
@@ -209,6 +274,7 @@ function syncPlexUI(rate) {
   });
 }
 
+// ── 설정 실시간 반영 ──────────────────────────────────────────
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.keywords) config.keywords = changes.keywords.newValue.split(',').map(s => s.trim());
   if (changes.plexNoSub) config.plexNoSub = parseFloat(changes.plexNoSub.newValue);
