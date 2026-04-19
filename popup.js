@@ -103,47 +103,58 @@ document.getElementById('extensionsLink').addEventListener('click', (e) => {
 
 // ── 버그 제보 ─────────────────────────────────────────────────
 document.getElementById('bugReportBtn').addEventListener('click', async () => {
-  const manifest = chrome.runtime.getManifest();
-  const currentVersion = manifest.version;
-  const chromeVersion = navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1] || "(알 수 없음)";
-  const os = navigator.userAgent.includes("Win") ? "Windows"
-            : navigator.userAgent.includes("Mac") ? "macOS"
-            : navigator.userAgent.includes("Linux") ? "Linux" : "(알 수 없음)";
+  chrome.storage.local.get({ debugLogs: [] }, async (result) => {
+    // 1. 기존 디버그 로그 다운로드 버튼과 동일한 방식으로 저장
+    if (result.debugLogs.length === 0) {
+      alert("기록된 로그가 없습니다.\n로그가 쌓인 후 다시 시도해 주세요.");
+      return;
+    }
+    const blob = new Blob([result.debugLogs.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stream_master_log_${new Date().getTime()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
 
-  const [syncItems, localItems] = await Promise.all([
-    new Promise(resolve => chrome.storage.sync.get(defaults, resolve)),
-    new Promise(resolve => chrome.storage.local.get({ debugLogs: [] }, resolve))
-  ]);
+    // 2. 이슈 본문에 환경정보 + 설정값 미리 채우기
+    const manifest = chrome.runtime.getManifest();
+    const chromeVersion = navigator.userAgent.match(/Chrome\/([\.\d]+)/)?.[1] || "(알 수 없음)";
+    const os = navigator.userAgent.includes("Win") ? "Windows"
+              : navigator.userAgent.includes("Mac") ? "macOS"
+              : navigator.userAgent.includes("Linux") ? "Linux" : "(알 수 없음)";
+    const syncItems = await new Promise(resolve => chrome.storage.sync.get(defaults, resolve));
 
-  const recentLog = localItems.debugLogs.slice(-30);
+    const body = [
+      `### 환경 정보`,
+      `- 확장 프로그램 버전: v${manifest.version}`,
+      `- 크롬 버전: ${chromeVersion}`,
+      `- OS: ${os}`,
+      ``,
+      `### 현재 설정`,
+      `- 전체 기능 활성화: ${syncItems.masterSwitch}`,
+      `- 브라우저 시작 시 자동 켜기: ${syncItems.autoResume}`,
+      `- 대상 사이트: ${(syncItems.allowedSites || []).join(", ") || "(없음)"}`,
+      `- 자동 클릭 키워드: ${syncItems.keywords}`,
+      `- Plex 배속 (자막 無): ${syncItems.plexNoSub}x`,
+      `- Plex 배속 (자막 有): ${syncItems.plexYesSub}x`,
+      ``,
+      `### 로그 파일`,
+      `(다운로드된 txt 파일을 여기에 첨부해 주세요)`,
+      ``,
+      `### 문제 설명`,
+      `(여기에 문제 상황을 설명해 주세요)`,
+    ].join('\n');
 
-  const body = [
-    `### 환경 정보`,
-    `- 확장 프로그램 버전: v${currentVersion}`,
-    `- 크롬 버전: ${chromeVersion}`,
-    `- OS: ${os}`,
-    ``,
-    `### 현재 설정`,
-    `- 전체 기능 활성화: ${syncItems.masterSwitch}`,
-    `- 브라우저 시작 시 자동 켜기: ${syncItems.autoResume}`,
-    `- 대상 사이트: ${(syncItems.allowedSites || []).join(", ") || "(없음)"}`,
-    `- 자동 클릭 키워드: ${syncItems.keywords}`,
-    `- Plex 배속 (자막 無): ${syncItems.plexNoSub}x`,
-    `- Plex 배속 (자막 有): ${syncItems.plexYesSub}x`,
-    ``,
-    `### 최근 로그 (최대 30줄)`,
-    `\`\`\``,
-    recentLog.length > 0 ? recentLog.join('\n') : '(로그 없음)',
-    `\`\`\``,
-    ``,
-    `### 문제 설명`,
-    `(여기에 문제 상황을 설명해 주세요)`,
-  ].join('\n');
+    const title = encodeURIComponent('[버그] ');
+    const encodedBody = encodeURIComponent(body);
 
-  const title = encodeURIComponent(`[버그] `);
-  const encodedBody = encodeURIComponent(body);
-  chrome.tabs.create({
-    url: `https://github.com/${GITHUB_REPO}/issues/new?title=${title}&body=${encodedBody}`
+    // 3. 이슈 페이지 열기
+    chrome.tabs.create({
+      url: `https://github.com/${GITHUB_REPO}/issues/new?title=${title}&body=${encodedBody}`
+    });
+
+
   });
 });
 
