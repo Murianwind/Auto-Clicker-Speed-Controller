@@ -98,6 +98,8 @@ function startObserver() {
         if (window.location.hostname.includes('netflix')) {
           video.addEventListener('timeupdate', timeUpdateHandler);
         }
+        // 새 영상 시작 시 전체화면 시도
+        tryRequestFullscreen();
       }
     } else if (lastVideoSrc !== "") {
       lastVideoSrc = "";
@@ -111,6 +113,17 @@ function startObserver() {
     if (!isProcessing) handleGenericButtons();
   });
   observer.observe(document.body, { childList: true, subtree: true });
+}
+
+// ── 전체화면 전환 ─────────────────────────────────────────────
+function tryRequestFullscreen() {
+  if (document.fullscreenElement) return; // 이미 전체화면이면 스킵
+  const el = document.documentElement;
+  if (el.requestFullscreen) {
+    el.requestFullscreen().catch(() => {});
+  } else if (el.webkitRequestFullscreen) {
+    el.webkitRequestFullscreen();
+  }
 }
 
 // ── Netflix: 네이티브 pause/play 콤보로 OSD 활성화 후 다음화 클릭 ──
