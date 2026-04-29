@@ -100,6 +100,13 @@ function startObserver() {
         }
         // 새 영상 시작 시 전체화면 시도
         tryRequestFullscreen();
+
+        // 일시정지 후 재생 시 전체화면 시도
+        video.addEventListener('play', () => {
+          tryRequestFullscreen();
+        });
+
+
       }
     } else if (lastVideoSrc !== "") {
       lastVideoSrc = "";
