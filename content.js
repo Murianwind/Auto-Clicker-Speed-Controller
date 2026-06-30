@@ -90,7 +90,12 @@ function startObserver() {
       if (sessionCheckTimeout) { clearTimeout(sessionCheckTimeout); sessionCheckTimeout = null; }
       if (video.src !== lastVideoSrc) {
         lastVideoSrc = video.src;
-        isProcessing = false;
+        // [FIX] isProcessing을 여기서 강제로 false로 풀지 않습니다.
+        // 다음화 버튼 클릭 직후 video.src가 거의 즉시 바뀌면서 이 블록이 실행되는데,
+        // 여기서 잠금을 풀어버리면 같은 관찰자 콜백 안에서 handleGenericButtons()가
+        // 곧바로 재실행되어, 전환 중인 화면에 남아있는 잔여 UI를 다시 클릭해
+        // 한 화를 더 건너뛰는 문제가 있었습니다.
+        // 각 클릭 동작에 이미 설정된 자체 타이머(3초/5초/12초)가 안전하게 잠금을 해제합니다.
         window.netflixCreditFound = false;
         if (trackedVideo) trackedVideo.removeEventListener('timeupdate', timeUpdateHandler);
         trackedVideo = video;
@@ -105,8 +110,6 @@ function startObserver() {
         video.addEventListener('play', () => {
           tryRequestFullscreen();
         });
-
-
       }
     } else if (lastVideoSrc !== "") {
       lastVideoSrc = "";
