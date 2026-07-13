@@ -90,12 +90,18 @@ function startObserver() {
       if (sessionCheckTimeout) { clearTimeout(sessionCheckTimeout); sessionCheckTimeout = null; }
       if (video.src !== lastVideoSrc) {
         lastVideoSrc = video.src;
-        // [FIX] isProcessing을 여기서 강제로 false로 풀지 않습니다.
-        // 다음화 버튼 클릭 직후 video.src가 거의 즉시 바뀌면서 이 블록이 실행되는데,
-        // 여기서 잠금을 풀어버리면 같은 관찰자 콜백 안에서 handleGenericButtons()가
-        // 곧바로 재실행되어, 전환 중인 화면에 남아있는 잔여 UI를 다시 클릭해
-        // 한 화를 더 건너뛰는 문제가 있었습니다.
-        // 각 클릭 동작에 이미 설정된 자체 타이머(3초/5초/12초)가 안전하게 잠금을 해제합니다.
+        // [FIX] 영상 전환이 확인된 시점: 길게 걸려있는 잠금(최대 12초)을 2초 유예로 단축합니다.
+        // - 즉시 풀지 않는 이유: 전환 직후 잔여 UI를 중복 클릭하던 Plex 문제 방지 (2초 유예 유지)
+        // - 12초를 그대로 두지 않는 이유: 로그 실측 결과, 새 영상 시작 직후 뜨는
+        //   오프닝/줄거리 건너뛰기 버튼의 첫 감지가 정확히 잠금 만료 시점(12~13초 후)까지
+        //   지연되어 버튼을 놓치는 문제가 확인됨 (4:00:22→4:00:34, 10:51:08→10:51:21)
+        if (isProcessing) {
+          if (netflixProcessingTimer) clearTimeout(netflixProcessingTimer);
+          netflixProcessingTimer = setTimeout(() => {
+            isProcessing = false;
+            netflixProcessingTimer = null;
+          }, 2000);
+        }
         window.netflixCreditFound = false;
         if (trackedVideo) trackedVideo.removeEventListener('timeupdate', timeUpdateHandler);
         trackedVideo = video;
@@ -242,6 +248,40 @@ function handleGenericButtons() {
         }
       } else {
         addLog('자동클릭', `키워드: "${matchedKeyword}" | 내용: "${text}"`);
+
+        const isNetflixSkip =
+          window.location.hostname.includes('netflix') &&
+          (text.includes('오프닝') || text.includes('줄거리'));
+
+        // Netflix 오프닝/줄거리: 즉시 클릭 + 신선한 참조로 재시도
+        if (isNetflixSkip) {
+          // [FIX] 즉시 클릭을 먼저 실행합니다. (기존 코드는 1.2초 대기 후에만 클릭)
+          physicalClick(btn);
+          btn.click();
+
+          // [FIX] 재시도 시 처음 잡아둔 btn 참조를 쓰지 않고 매번 버튼을 새로 찾습니다.
+          // 영상 시작 직후에는 넷플릭스(React)가 UI를 계속 다시 렌더링해서
+          // 버튼 엘리먼트 인스턴스가 교체되므로, 잡아둔 참조는 이미 죽은
+          // 엘리먼트일 수 있어 클릭해도 효과가 없습니다. (로그 실측으로 확인:
+          // 같은 버튼이 6초간 12회 반복 감지 = 클릭이 안 먹고 있었음)
+          let retry = 0;
+          const kw = matchedKeyword;
+          const timer = setInterval(() => {
+            const fresh = [...document.querySelectorAll('button, [role="button"]')].find(b =>
+              ((b.innerText || '').trim().includes(kw)) && b.offsetParent !== null
+            );
+            if (!fresh) { clearInterval(timer); return; } // 버튼이 사라짐 = 성공
+            retry++;
+            addLog('자동클릭', `Netflix Skip 재시도 ${retry}`);
+            physicalClick(fresh);
+            fresh.click();
+            if (retry >= 8) clearInterval(timer);
+          }, 400);
+
+          return;
+        }
+
+        // 나머지는 기존 동작 유지
         btn.click();
       }
     }
